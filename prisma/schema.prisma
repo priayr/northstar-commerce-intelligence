@@ -1,0 +1,230 @@
+// ──────────────────────────────────────────────────────────
+// Northstar Commerce Intelligence — Prisma Schema
+// Database: SQLite (PostgreSQL-compatible schema)
+// ──────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Core Business Entities ───
+
+model Customer {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  segment            String    @default("standard")
+  region             String
+  acquisitionChannel String    @map("acquisition_channel")
+  firstOrderDate     DateTime? @map("first_order_date")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  orders          Order[]
+  sessions        Session[]
+  customerMetrics CustomerMetric[]
+
+  @@index([region])
+  @@index([acquisitionChannel])
+  @@index([segment])
+  @@map("customers")
+}
+
+model Category {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  parentId  String? @map("parent_id")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  categoryId  String   @map("category_id")
+  name        String
+  sku         String   @unique
+  costPrice   Float    @map("cost_price")
+  retailPrice Float    @map("retail_price")
+  brand       String
+  weight      Float    @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+
+  category   Category    @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+  productPerformances ProductPerformance[]
+
+  @@index([categoryId])
+  @@index([sku])
+  @@map("products")
+}
+
+model Order {
+  id             String    @id @default(cuid())
+  customerId     String    @map("customer_id")
+  status         String    @default("processing")
+  channel        String
+  region         String
+  subtotal       Float
+  discountAmount Float     @default(0) @map("discount_amount")
+  tax            Float     @default(0)
+  shippingCost   Float     @default(0) @map("shipping_cost")
+  total          Float
+  orderDate      DateTime  @map("order_date")
+  shippedDate    DateTime? @map("shipped_date")
+  deliveredDate  DateTime? @map("delivered_date")
+
+  customer Customer    @relation(fields: [customerId], references: [id])
+  items    OrderItem[]
+  payment  Payment?
+
+  @@index([customerId])
+  @@index([orderDate])
+  @@index([status])
+  @@index([channel])
+  @@index([region])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String @map("order_id")
+  productId String @map("product_id")
+  quantity  Int
+  unitPrice Float  @map("unit_price")
+  discount  Float  @default(0)
+  lineTotal Float  @map("line_total")
+
+  order        Order    @relation(fields: [orderId], references: [id])
+  product      Product  @relation(fields: [productId], references: [id])
+  returnRecord Return?
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id      String   @id @default(cuid())
+  orderId String   @unique @map("order_id")
+  method  String
+  status  String   @default("completed")
+  amount  Float
+  paidAt  DateTime @map("paid_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([method])
+  @@map("payments")
+}
+
+model Return {
+  id           String    @id @default(cuid())
+  orderItemId  String    @unique @map("order_item_id")
+  reason       String
+  status       String    @default("pending")
+  refundAmount Float     @map("refund_amount")
+  initiatedAt  DateTime  @map("initiated_at")
+  resolvedAt   DateTime? @map("resolved_at")
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id])
+
+  @@index([status])
+  @@map("returns")
+}
+
+model Session {
+  id              String   @id @default(cuid())
+  customerId      String?  @map("customer_id")
+  device          String
+  browser         String
+  channel         String
+  pagesViewed     Int      @default(1) @map("pages_viewed")
+  addedToCart     Boolean  @default(false) @map("added_to_cart")
+  reachedCheckout Boolean  @default(false) @map("reached_checkout")
+  converted       Boolean  @default(false)
+  startedAt       DateTime @map("started_at")
+
+  customer Customer? @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([startedAt])
+  @@index([channel])
+  @@map("sessions")
+}
+
+model Region {
+  id              String @id @default(cuid())
+  name            String @unique
+  country         String
+  zone            String
+  avgShippingDays Float  @default(5) @map("avg_shipping_days")
+
+  @@map("regions")
+}
+
+// ─── Materialized / Pre-computed Summary Tables ───
+
+model DailyMetric {
+  id                 String   @id @default(cuid())
+  date               DateTime @unique
+  revenue            Float    @default(0)
+  netRevenue         Float    @default(0) @map("net_revenue")
+  orders             Int      @default(0)
+  unitsSold          Int      @default(0) @map("units_sold")
+  aov                Float    @default(0)
+  refundAmount       Float    @default(0) @map("refund_amount")
+  newCustomers       Int      @default(0) @map("new_customers")
+  returningCustomers Int      @default(0) @map("returning_customers")
+  discountTotal      Float    @default(0) @map("discount_total")
+
+  @@index([date])
+  @@map("daily_metrics")
+}
+
+model ProductPerformance {
+  id                 String @id @default(cuid())
+  productId          String @map("product_id")
+  productName        String @map("product_name")
+  categoryName       String @map("category_name")
+  totalRevenue       Float  @default(0) @map("total_revenue")
+  totalQuantity      Int    @default(0) @map("total_quantity")
+  returnCount        Int    @default(0) @map("return_count")
+  returnRate         Float  @default(0) @map("return_rate")
+  marginProxy        Float  @default(0) @map("margin_proxy")
+  repeatPurchaseRate Float  @default(0) @map("repeat_purchase_rate")
+  avgDiscount        Float  @default(0) @map("avg_discount")
+
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("product_performance")
+}
+
+model CustomerMetric {
+  id                 String   @id @default(cuid())
+  customerId         String   @map("customer_id")
+  customerName       String   @map("customer_name")
+  totalOrders        Int      @default(0) @map("total_orders")
+  totalSpent         Float    @default(0) @map("total_spent")
+  avgOrderValue      Float    @default(0) @map("avg_order_value")
+  firstOrderDate     DateTime @map("first_order_date")
+  lastOrderDate      DateTime @map("last_order_date")
+  daysSinceLastOrder Int      @default(0) @map("days_since_last_order")
+  rfmRecency         Int      @default(0) @map("rfm_recency")
+  rfmFrequency       Int      @default(0) @map("rfm_frequency")
+  rfmMonetary        Int      @default(0) @map("rfm_monetary")
+  segment            String   @default("new")
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@index([segment])
+  @@map("customer_metrics")
+}
